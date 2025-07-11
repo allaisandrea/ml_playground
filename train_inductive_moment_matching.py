@@ -44,6 +44,7 @@ def main(
     mlflow_local_path: str | None,
     match_at: str,
     loss_type: str,
+    kernel_radius: float,
     args: dict[str, Any],
 ):
     if batch_size % n_particles != 0:
@@ -95,7 +96,7 @@ def main(
             loss = torch.nn.functional.mse_loss(x_s_pred, x_s_target)
         elif loss_type == "mmd":
             loss = playground.imm_compute_loss(
-                x_s_target, x_s_pred, playground.LaplacianKernel(sigma=1.0)
+                x_s_target, x_s_pred, playground.LaplacianKernel(sigma=kernel_radius)
             )
         else:
             raise ValueError(f"Invalid loss_type: {loss_type}")
@@ -147,5 +148,6 @@ if __name__ == "__main__":
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     parser.add_argument("--match-at", type=str, default="s")
     parser.add_argument("--loss-type", type=str, default="mmd")
+    parser.add_argument("--kernel-radius", type=float, default=4.0)
     args = vars(parser.parse_args())
     main(**args, args=args)
