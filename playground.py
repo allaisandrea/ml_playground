@@ -52,6 +52,7 @@ def init_run(
         experiment_id="730119036412452",
     )
     logger.info("Starting run %s", run_name)
+    logger.info("Output path: %s", output_path)
     return run_name, output_path
 
 
@@ -427,9 +428,10 @@ class NoiseSchedule:
 
 
 class ImmModel(torch.nn.Module):
-    def __init__(self, n_channels: int, n_layers: int, condition_on_s: bool):
+    def __init__(self, n_channels: int, n_layers: int, condition_on_s: bool, enforce_consistency: bool):
         super().__init__()
         self.condition_on_s = condition_on_s
+        self.enforce_consistency = enforce_consistency
         self.mlp = Mlp(4, 2, n_channels, n_layers)
 
     def forward(
@@ -455,7 +457,10 @@ class ImmModel(torch.nn.Module):
         t_flat = t.reshape(-1, 1)
         s_flat = s.reshape(-1, 1)
         x0_model = self.mlp(torch.cat([t_flat, s_flat, x_t_flat], dim=1)) 
-        x0_flat = t_flat * x0_model + (1 - t_flat) * x_t_flat
+        if self.enforce_consistency:
+            x0_flat = t_flat * x0_model + (1 - t_flat) * x_t_flat
+        else:
+            x0_flat = x0_model
         assert x0_flat.shape == x_t_flat.shape
         return x0_flat.view(x_t.shape)
 

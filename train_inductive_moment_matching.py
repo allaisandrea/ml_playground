@@ -46,6 +46,7 @@ def main(
     loss_type: str,
     kernel_radius: float,
     condition_on_s: bool,
+    enforce_consistency: bool,
     args: dict[str, Any],
 ):
     if batch_size % n_particles != 0:
@@ -57,11 +58,12 @@ def main(
         tag, output_root, logger, mlflow_local_path
     )
     mlflow.log_params(args)
+    logger.info("Args:\n   " + "\n   ".join([f"{key}: {value}" for key, value in args.items()]))
 
     noise_schedule = playground.NoiseSchedule.flow_matching()
     checkerboard = playground.CheckerboardDistribution(num_blocks=2, range_=4.0)
     model = playground.ImmModel(
-        n_channels=1024, n_layers=4, condition_on_s=condition_on_s
+        n_channels=1024, n_layers=4, condition_on_s=condition_on_s, enforce_consistency=enforce_consistency
     ).cuda()
 
     generator = torch.Generator("cuda")
@@ -141,17 +143,18 @@ if __name__ == "__main__":
         type=str,
         default=playground.DEFAULT_OUTPUT_ROOT,
     )
-    parser.add_argument("--n-steps", type=int, default=200_000)
+    parser.add_argument("--n-steps", type=int, default=50_000)
     parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument("--log-every", type=int, default=1000)
     parser.add_argument("--n-sample", type=int, default=100_000)
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
-    parser.add_argument("--n-particles", type=int, default=16)
+    parser.add_argument("--n-particles", type=int, default=4)
     parser.add_argument("--dt", type=float, default=0.01)
     parser.add_argument("--mlflow-local-path", type=str, default=None)
-    parser.add_argument("--match-at", type=str, default="s")
+    parser.add_argument("--match-at", type=str, default="0")
     parser.add_argument("--loss-type", type=str, default="mmd")
     parser.add_argument("--kernel-radius", type=float, default=4.0)
-    parser.add_argument("--condition-on-s", action="store_true")
+    parser.add_argument("--condition-on-s", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--enforce-consistency", action=argparse.BooleanOptionalAction, default=True)
     args = vars(parser.parse_args())
     main(**args, args=args)
