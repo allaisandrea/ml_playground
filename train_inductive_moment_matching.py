@@ -20,13 +20,15 @@ def get_sample(
     noise_schedule: playground.NoiseSchedule,
 ):
     t_steps = np.power(1 - np.arange(n_sample_steps + 1) / n_sample_steps, power)
-    x_t = torch.randn(batch_size, 2, device=generator.device, generator=generator)
-    # t1_value < t2_value
+    x_0 = torch.zeros((batch_size, 2), device=generator.device)
+    # t1_value < t2_value, t2_value: [1, 0.9,..., 0.1]
     for t1_value, t2_value in zip(t_steps[1:], t_steps[:-1]):
-        t1 = torch.full((batch_size,), t1_value, device=generator.device)
+        # t1 = torch.full((batch_size,), t1_value, device=generator.device)
         t2 = torch.full((batch_size,), t2_value, device=generator.device)
-        x_t = model(x_t, t1, t2, noise_schedule)
-    return x_t
+        x_1 = torch.randn(batch_size, 2, device=generator.device, generator=generator)
+        x_t = (1 - t2[:, None]) * x_0 + t2[:, None] * x_1
+        x_0 = model(x_t, t2, noise_schedule)
+    return x_0
 
 
 def main(
@@ -38,6 +40,7 @@ def main(
     n_sample: int,
     learning_rate: float,
     n_particles: int,
+    dt: float,
     mlflow_local_path: str | None,
     args: dict[str, Any],
 ):
@@ -65,32 +68,32 @@ def main(
         x_0 = checkerboard.sample(group_size * n_particles, generator).reshape(
             group_size, n_particles, 2
         )
-        t = torch.rand(
+        x_1 = torch.randn(group_size, n_particles, 2, device=generator.device, generator=generator)
+        r = (1 - dt) * torch.rand(
             (group_size, 1), device=generator.device, generator=generator
         ).expand(group_size, n_particles)
-        r = t * torch.rand(
-            (group_size, 1), device=generator.device, generator=generator
-        )
-        s = r * torch.rand(
-            (group_size, 1), device=generator.device, generator=generator
-        )
-        x_t = playground.sample_from_diffusion_process(
-            noise_schedule, x_0, t, generator
-        )
-        x_r = playground.ddim_interpolate(x_t, x_0, r, t, noise_schedule)
+        t = torch.minimum(r + dt, torch.ones_like(r))
+        x_r = r[:, None] * x_1 + (1 - r[:, None]) * x_0
+        x_t = t[:, None] * x_1 + (1 - t[:, None]) * x_0
+        # s = torch.zeros((group_size, 1), device=generator.device ).expand(group_size, n_particles)
+        # x_t = playground.sample_from_diffusion_process(
+        #     noise_schedule, x_0, t, generator
+        # )
+        # x_r = playground.ddim_interpolate(x_t, x_0, r, t, noise_schedule)
         with torch.no_grad():
-            x_sa = model(x_r, s, r, noise_schedule)
-        x_sb = model(x_t, s, t, noise_schedule)
-        loss = playground.imm_compute_loss(
-            x_sa, x_sb, playground.LaplacianKernel(sigma=1.0)
-        )
+            x_0_target = model(x_r, r, noise_schedule)
+        x_0_pred = model(x_t, t, noise_schedule)
+        # loss = playground.imm_compute_loss(
+        #     x_sa, x_sb, playground.LaplacianKernel(sigma=1.0)
+        # )
+        loss = torch.nn.functional.mse_loss(x_0_pred, x_0_target)
         loss.backward()
         optimizer.step()
 
         sample_timer.start()
         if step % log_every == 0:
             logger.info("Compute metrics for step %d", step)
-            for n_sample_steps in [1, 2, 3]:
+            for n_sample_steps in [1, 2, 3, 4]:
                 checkerboard.compute_and_log_relative_entropy(
                     get_sample=functools.partial(
                         get_sample,
@@ -128,6 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-sample", type=int, default=100_000)
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
     parser.add_argument("--n-particles", type=int, default=16)
+    parser.add_argument("--dt", type=float, default=0.01)
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     args = vars(parser.parse_args())
     main(**args, args=args)

@@ -458,12 +458,12 @@ def ddim_interpolate(
 class ImmModel(torch.nn.Module):
     def __init__(self, n_channels: int, n_layers: int):
         super().__init__()
-        self.mlp = Mlp(4, 2, n_channels, n_layers)
+        self.mlp = Mlp(3, 2, n_channels, n_layers)
 
     def forward(
         self,
         x_t: torch.Tensor,
-        s: torch.Tensor,
+        # s: torch.Tensor,
         t: torch.Tensor,
         noise_schedule: NoiseSchedule,
     ):
@@ -476,13 +476,15 @@ class ImmModel(torch.nn.Module):
         """
         assert x_t.ndim >= 2
         assert t.shape == x_t.shape[:-1]
-        assert s.shape == x_t.shape[:-1]
+        # assert s.shape == x_t.shape[:-1]
         x_t_flat = x_t.reshape(-1, x_t.shape[-1])
         t_flat = t.reshape(-1, 1)
-        s_flat = s.reshape(-1, 1)
-        x_0_flat = self.mlp(torch.cat([t_flat, s_flat, x_t_flat], dim=1))
-        x_0 = x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
-        return ddim_interpolate(x_t, x_0, s, t, noise_schedule)
+        # x_0_flat = self.mlp(torch.cat([t_flat, x_t_flat], dim=1))
+        # x_0 = x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
+        # return ddim_interpolate(x_t, x_0, s, t, noise_schedule)
+        x0_flat = t_flat * self.mlp(torch.cat([t_flat, x_t_flat], dim=1)) + (1 - t_flat) * x_t_flat
+        assert x0_flat.shape == x_t_flat.shape
+        return x0_flat.view(x_t.shape)
 
 
 def sample_from_diffusion_process(
