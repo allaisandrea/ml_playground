@@ -42,6 +42,8 @@ def main(
     n_particles: int,
     dt: float,
     mlflow_local_path: str | None,
+    match_at: str,
+    loss_type: str,
     args: dict[str, Any],
 ):
     if batch_size % n_particles != 0:
@@ -73,20 +75,30 @@ def main(
             (group_size, 1), device=generator.device, generator=generator
         ).expand(group_size, n_particles)
         t = torch.minimum(r + dt, torch.ones_like(r))
-        x_r = r[:, None] * x_1 + (1 - r[:, None]) * x_0
-        x_t = t[:, None] * x_1 + (1 - t[:, None]) * x_0
-        s = r * torch.rand(
-            (group_size, 1), device=generator.device, generator=generator
-        ).expand(group_size, n_particles)
+        x_r = r[..., None] * x_1 + (1 - r[..., None]) * x_0
+        x_t = t[..., None] * x_1 + (1 - t[..., None]) * x_0
+        if match_at == "s":
+            s = r * torch.rand(
+                (group_size, 1), device=generator.device, generator=generator
+            ).expand(group_size, n_particles)
+        elif match_at == "0":
+            s = torch.zeros_like(r)
+        else:
+            raise ValueError(f"Invalid match_at: {match_at}")
         with torch.no_grad():
             x_0_target = model(x_r, r, noise_schedule)
         x_0_pred = model(x_t, t, noise_schedule)
 
-        x_s_target = s[:, None] * x_1 + (1 - s[:, None]) * x_0_target
-        x_s_pred = s[:, None] * x_1 + (1 - s[:, None]) * x_0_pred
-        loss = playground.imm_compute_loss(
-            x_s_target, x_s_pred, playground.LaplacianKernel(sigma=1.0)
-        )
+        x_s_target = s[..., None] * x_1 + (1 - s[..., None]) * x_0_target
+        x_s_pred = s[..., None] * x_1 + (1 - s[..., None]) * x_0_pred
+        if loss_type == "mse":
+            loss = torch.nn.functional.mse_loss(x_s_pred, x_s_target)
+        elif loss_type == "mmd":
+            loss = playground.imm_compute_loss(
+                x_s_target, x_s_pred, playground.LaplacianKernel(sigma=1.0)
+            )
+        else:
+            raise ValueError(f"Invalid loss_type: {loss_type}")
         loss.backward()
         optimizer.step()
 
@@ -133,5 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-particles", type=int, default=16)
     parser.add_argument("--dt", type=float, default=0.01)
     parser.add_argument("--mlflow-local-path", type=str, default=None)
+    parser.add_argument("--match-at", type=str, default="s")
+    parser.add_argument("--loss-type", type=str, default="mmd")
     args = vars(parser.parse_args())
     main(**args, args=args)
