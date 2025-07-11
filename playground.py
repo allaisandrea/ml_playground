@@ -426,44 +426,16 @@ class NoiseSchedule:
         return cls(alpha=alpha, sigma=sigma, time_range=(0.0, 1.0))
 
 
-def ddim_interpolate(
-    x_t: torch.Tensor,
-    x_0: torch.Tensor,
-    s: torch.Tensor,
-    t: torch.Tensor,
-    noise_schedule: NoiseSchedule,
-):
-    """DDIM interpolation
-
-    x_t: [*ldim, d] The conditional noisy point at time t
-    x_0: [*ldim, d] the clean data point
-    s: [*ldim] in [0, 1] the required interpolation time between 0 and t
-    t: [*ldim] in [0, 1] the conditional interpolation time
-    noise_schedule: the noise_schedule
-    returns: [batch_size, d] the interpolated point at time s
-    """
-    assert x_0.ndim >= 2
-    assert t.shape == s.shape
-    assert x_0.shape == x_t.shape
-    assert t.shape == x_t.shape[:-1]
-    t = t.unsqueeze(-1)
-    s = s.unsqueeze(-1)
-    alpha_t = noise_schedule.alpha(t)
-    alpha_s = noise_schedule.alpha(s)
-    sigma_t = noise_schedule.sigma(t)
-    sigma_s = noise_schedule.sigma(s)
-    return (alpha_s - alpha_t * sigma_s / sigma_t) * x_0 + (sigma_s / sigma_t) * x_t
-
-
 class ImmModel(torch.nn.Module):
-    def __init__(self, n_channels: int, n_layers: int):
+    def __init__(self, n_channels: int, n_layers: int, condition_on_s: bool):
         super().__init__()
-        self.mlp = Mlp(3, 2, n_channels, n_layers)
+        self.condition_on_s = condition_on_s
+        self.mlp = Mlp(4, 2, n_channels, n_layers)
 
     def forward(
         self,
         x_t: torch.Tensor,
-        # s: torch.Tensor,
+        s: torch.Tensor,
         t: torch.Tensor,
         noise_schedule: NoiseSchedule,
     ):
@@ -476,13 +448,14 @@ class ImmModel(torch.nn.Module):
         """
         assert x_t.ndim >= 2
         assert t.shape == x_t.shape[:-1]
-        # assert s.shape == x_t.shape[:-1]
+        if not self.condition_on_s:
+            s = torch.zeros_like(t)
+        assert s.shape == x_t.shape[:-1]
         x_t_flat = x_t.reshape(-1, x_t.shape[-1])
         t_flat = t.reshape(-1, 1)
-        # x_0_flat = self.mlp(torch.cat([t_flat, x_t_flat], dim=1))
-        # x_0 = x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
-        # return ddim_interpolate(x_t, x_0, s, t, noise_schedule)
-        x0_flat = t_flat * self.mlp(torch.cat([t_flat, x_t_flat], dim=1)) + (1 - t_flat) * x_t_flat
+        s_flat = s.reshape(-1, 1)
+        x0_model = self.mlp(torch.cat([t_flat, s_flat, x_t_flat], dim=1)) 
+        x0_flat = t_flat * x0_model + (1 - t_flat) * x_t_flat
         assert x0_flat.shape == x_t_flat.shape
         return x0_flat.view(x_t.shape)
 

@@ -23,11 +23,11 @@ def get_sample(
     x_0 = torch.zeros((batch_size, 2), device=generator.device)
     # t1_value < t2_value, t2_value: [1, 0.9,..., 0.1]
     for t1_value, t2_value in zip(t_steps[1:], t_steps[:-1]):
-        # t1 = torch.full((batch_size,), t1_value, device=generator.device)
+        t1 = torch.full((batch_size,), t1_value, device=generator.device)
         t2 = torch.full((batch_size,), t2_value, device=generator.device)
         x_1 = torch.randn(batch_size, 2, device=generator.device, generator=generator)
         x_t = (1 - t2[:, None]) * x_0 + t2[:, None] * x_1
-        x_0 = model(x_t, t2, noise_schedule)
+        x_0 = model(x_t, t1, t2, noise_schedule)
     return x_0
 
 
@@ -45,6 +45,7 @@ def main(
     match_at: str,
     loss_type: str,
     kernel_radius: float,
+    condition_on_s: bool,
     args: dict[str, Any],
 ):
     if batch_size % n_particles != 0:
@@ -59,7 +60,9 @@ def main(
 
     noise_schedule = playground.NoiseSchedule.flow_matching()
     checkerboard = playground.CheckerboardDistribution(num_blocks=2, range_=4.0)
-    model = playground.ImmModel(n_channels=1024, n_layers=4).cuda()
+    model = playground.ImmModel(
+        n_channels=1024, n_layers=4, condition_on_s=condition_on_s
+    ).cuda()
 
     generator = torch.Generator("cuda")
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -87,8 +90,8 @@ def main(
         else:
             raise ValueError(f"Invalid match_at: {match_at}")
         with torch.no_grad():
-            x_0_target = model(x_r, r, noise_schedule)
-        x_0_pred = model(x_t, t, noise_schedule)
+            x_0_target = model(x_r, s, r, noise_schedule)
+        x_0_pred = model(x_t, s, t, noise_schedule)
 
         x_s_target = s[..., None] * x_1 + (1 - s[..., None]) * x_0_target
         x_s_pred = s[..., None] * x_1 + (1 - s[..., None]) * x_0_pred
@@ -149,5 +152,6 @@ if __name__ == "__main__":
     parser.add_argument("--match-at", type=str, default="s")
     parser.add_argument("--loss-type", type=str, default="mmd")
     parser.add_argument("--kernel-radius", type=float, default=4.0)
+    parser.add_argument("--condition-on-s", action="store_true")
     args = vars(parser.parse_args())
     main(**args, args=args)
