@@ -481,8 +481,7 @@ class ImmModel(torch.nn.Module):
         t_flat = t.reshape(-1, 1)
         s_flat = s.reshape(-1, 1)
         x_0_flat = self.mlp(torch.cat([t_flat, s_flat, x_t_flat], dim=1))
-        x_0 = x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
-        return ddim_interpolate(x_t, x_0, s, t, noise_schedule)
+        return x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
 
 
 def sample_from_diffusion_process(

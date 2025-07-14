@@ -25,7 +25,8 @@ def get_sample(
     for t1_value, t2_value in zip(t_steps[1:], t_steps[:-1]):
         t1 = torch.full((batch_size,), t1_value, device=generator.device)
         t2 = torch.full((batch_size,), t2_value, device=generator.device)
-        x_t = model(x_t, t1, t2, noise_schedule)
+        x_0 = model(x_t, t1, t2, noise_schedule)
+        x_t = playground.ddim_interpolate(x_t, x_0, t1, t2, noise_schedule)
     return x_t
 
 
@@ -48,6 +49,7 @@ def main(
             f"batch_size ({batch_size}) must be divisible by n_particles ({n_particles})"
         )
     group_size = batch_size // n_particles
+    torch.manual_seed(0)
     run_name, output_path = playground.init_run(
         tag, output_root, logger, mlflow_local_path
     )
@@ -80,8 +82,10 @@ def main(
         x_t = (1 - t[..., None]) * x_0 + t[..., None] * x_1
         x_r = (1 - r[..., None]) * x_0 + r[..., None] * x_1
         with torch.no_grad():
-            x_sa = model(x_r, s, r, noise_schedule)
-        x_sb = model(x_t, s, t, noise_schedule)
+            x_0a = model(x_r, s, r, noise_schedule)
+        x_sa = playground.ddim_interpolate(x_r, x_0a, s, r, noise_schedule)
+        x_0b = model(x_t, s, t, noise_schedule)
+        x_sb = playground.ddim_interpolate(x_t, x_0b, s, t, noise_schedule)
         loss = playground.imm_compute_loss(
             x_sa, x_sb, playground.LaplacianKernel(sigma=kernel_size)
         )
