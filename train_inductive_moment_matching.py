@@ -38,6 +38,7 @@ def main(
     n_sample: int,
     learning_rate: float,
     n_particles: int,
+    kernel_size: float,
     mlflow_local_path: str | None,
     args: dict[str, Any],
 ):
@@ -82,7 +83,7 @@ def main(
             x_sa = model(x_r, s, r, noise_schedule)
         x_sb = model(x_t, s, t, noise_schedule)
         loss = playground.imm_compute_loss(
-            x_sa, x_sb, playground.LaplacianKernel(sigma=1.0)
+            x_sa, x_sb, playground.LaplacianKernel(sigma=kernel_size)
         )
         loss.backward()
         optimizer.step()
@@ -127,7 +128,8 @@ if __name__ == "__main__":
     parser.add_argument("--log-every", type=int, default=1000)
     parser.add_argument("--n-sample", type=int, default=100_000)
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
-    parser.add_argument("--n-particles", type=int, default=16)
+    parser.add_argument("--n-particles", type=int, default=4)
+    parser.add_argument("--kernel-size", type=float, default=1.0)
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     args = vars(parser.parse_args())
     main(**args, args=args)
