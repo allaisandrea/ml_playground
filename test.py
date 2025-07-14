@@ -292,6 +292,28 @@ def test_simple_model_io(output_path: str):
         assert torch.all(model.state_dict()[key] == model_loaded.state_dict()[key])
 
 
+def test_ddim_equivalence(output_path: str):
+    logger.info("Testing ddim equivalence")
+    batch_size = 8
+    noise_schedule = playground.NoiseSchedule.flow_matching()
+    rng = torch.Generator("cpu")
+    x_0 = torch.randn((batch_size, 2), generator=rng)
+    t = torch.rand((batch_size,), generator=rng)
+    s = t * torch.rand((batch_size,), generator=rng)
+    x_ta, x_1 = playground.sample_from_diffusion_process(
+        noise_schedule=noise_schedule,
+        x0=x_0,
+        t=t,
+        generator=rng,
+    )
+    x_tb = (1 - t[:, None]) * x_0 + t[:, None] * x_1
+    assert torch.allclose(x_ta, x_tb), f"x_ta: {x_ta}\nx_tb: {x_tb}"
+    x_sa = playground.ddim_interpolate(x_ta, x_0, s, t, noise_schedule)
+    x_sb = (1 - s[:, None]) * x_0 + s[:, None] * x_1
+    assert torch.allclose(x_sa, x_sb)
+    
+
+
 def test_all(output_path: str):
     for task in DISPATCH.keys() - {"all"}:
         DISPATCH[task](output_path)
@@ -306,6 +328,7 @@ DISPATCH = {
     "integrate_flow": test_integrate_flow,
     "flow_matching_compute_log_likelihood": test_flow_matching_compute_log_likelihood,
     "simple_model_io": test_simple_model_io,
+    "ddim_equivalence": test_ddim_equivalence,
 }
 
 

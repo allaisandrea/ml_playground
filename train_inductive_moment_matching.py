@@ -74,10 +74,11 @@ def main(
         s = r * torch.rand(
             (group_size, 1), device=generator.device, generator=generator
         ).expand(group_size, n_particles)
-        x_t = playground.sample_from_diffusion_process(
-            noise_schedule, x_0, t, generator
+        x_1 = torch.randn(
+            (group_size, n_particles, 2), device=generator.device, generator=generator
         )
-        x_r = playground.ddim_interpolate(x_t, x_0, r, t, noise_schedule)
+        x_t = (1 - t[..., None]) * x_0 + t[..., None] * x_1
+        x_r = (1 - r[..., None]) * x_0 + r[..., None] * x_1
         with torch.no_grad():
             x_sa = model(x_r, s, r, noise_schedule)
         x_sb = model(x_t, s, t, noise_schedule)

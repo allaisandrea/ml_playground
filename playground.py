@@ -490,7 +490,7 @@ def sample_from_diffusion_process(
     x0: torch.Tensor,
     t: torch.Tensor,
     generator: torch.Generator,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Sample from the diffusion process.
 
     x0: [*ldim, d] the clean data point
@@ -502,7 +502,7 @@ def sample_from_diffusion_process(
     assert t.shape == x0.shape[:-1]
     noise = torch.randn(x0.shape, generator=generator, device=x0.device)
     t = t.unsqueeze(-1)
-    return noise_schedule.alpha(t) * x0 + noise_schedule.sigma(t) * noise
+    return noise_schedule.alpha(t) * x0 + noise_schedule.sigma(t) * noise, noise
 
 
 def imm_compute_loss(
