@@ -39,6 +39,7 @@ def main(
     learning_rate: float,
     n_particles: int,
     kernel_size: float,
+    dt: float,
     mlflow_local_path: str | None,
     args: dict[str, Any],
 ):
@@ -66,15 +67,13 @@ def main(
         x_0 = checkerboard.sample(group_size * n_particles, generator).reshape(
             group_size, n_particles, 2
         )
-        t = torch.rand(
+        r = (1 - dt) * torch.rand(
             (group_size, 1), device=generator.device, generator=generator
         ).expand(group_size, n_particles)
-        r = t * torch.rand(
-            (group_size, 1), device=generator.device, generator=generator
-        )
+        t = r + dt
         s = r * torch.rand(
             (group_size, 1), device=generator.device, generator=generator
-        )
+        ).expand(group_size, n_particles)
         x_t = playground.sample_from_diffusion_process(
             noise_schedule, x_0, t, generator
         )
@@ -130,6 +129,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
     parser.add_argument("--n-particles", type=int, default=4)
     parser.add_argument("--kernel-size", type=float, default=1.0)
+    parser.add_argument("--dt", type=float, default=0.01)
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     args = vars(parser.parse_args())
     main(**args, args=args)
