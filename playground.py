@@ -484,26 +484,6 @@ class ImmModel(torch.nn.Module):
         return x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
 
 
-def sample_from_diffusion_process(
-    noise_schedule: NoiseSchedule,
-    x0: torch.Tensor,
-    t: torch.Tensor,
-    generator: torch.Generator,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample from the diffusion process.
-
-    x0: [*ldim, d] the clean data point
-    t: [*ldim] the time to sample at
-    generator: torch.Generator
-    returns: [*ldim, d] the sampled noisy point
-    """
-    assert x0.ndim >= 2
-    assert t.shape == x0.shape[:-1]
-    noise = torch.randn(x0.shape, generator=generator, device=x0.device)
-    t = t.unsqueeze(-1)
-    return noise_schedule.alpha(t) * x0 + noise_schedule.sigma(t) * noise, noise
-
-
 def imm_compute_loss(
     sample_a: torch.Tensor,
     sample_b: torch.Tensor,
