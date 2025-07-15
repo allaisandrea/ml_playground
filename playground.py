@@ -456,8 +456,12 @@ def ddim_interpolate(
 
 
 class ImmModel(torch.nn.Module):
-    def __init__(self, n_channels: int, n_layers: int):
+    def __init__(
+        self, n_channels: int, n_layers: int, condition_on_s: bool, enforce_bc: bool
+    ):
         super().__init__()
+        self.condition_on_s = condition_on_s
+        self.enforce_bc = enforce_bc
         self.mlp = Mlp(4, 2, n_channels, n_layers)
 
     def forward(
@@ -465,7 +469,6 @@ class ImmModel(torch.nn.Module):
         x_t: torch.Tensor,
         s: torch.Tensor,
         t: torch.Tensor,
-        noise_schedule: NoiseSchedule,
     ):
         """Forward pass of the IMM model.
 
@@ -477,10 +480,14 @@ class ImmModel(torch.nn.Module):
         assert x_t.ndim >= 2
         assert t.shape == x_t.shape[:-1]
         assert s.shape == x_t.shape[:-1]
+        if not self.condition_on_s:
+            s = torch.zeros_like(s)
         x_t_flat = x_t.reshape(-1, x_t.shape[-1])
         t_flat = t.reshape(-1, 1)
         s_flat = s.reshape(-1, 1)
         x_0_flat = self.mlp(torch.cat([t_flat, s_flat, x_t_flat], dim=1))
+        if self.enforce_bc:
+            x_0_flat = t_flat * x_0_flat + (1 - t_flat) * x_t_flat
         return x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
 
 
