@@ -16,6 +16,7 @@ def get_sample(
     generator: torch.Generator,
     n_sample_steps: int,
     power: float,
+    constant_noise: bool,
     model: playground.ImmModel,
     noise_schedule: playground.NoiseSchedule,
 ):
@@ -26,7 +27,11 @@ def get_sample(
         t1 = torch.full((batch_size,), t1_value, device=generator.device)
         t2 = torch.full((batch_size,), t2_value, device=generator.device)
         x_0 = model(x_t, t1, t2)
-        x_t = playground.ddim_interpolate(x_t, x_0, t1, t2, noise_schedule)
+        if constant_noise:
+            x_t = playground.ddim_interpolate(x_t, x_0, t1, t2, noise_schedule)
+        else:
+            x_1 = torch.randn(batch_size, 2, device=generator.device, generator=generator)
+            x_t = playground.ddim_interpolate(x_1, x_0, t1, torch.ones_like(t1), noise_schedule)
     return x_t
 
 
@@ -45,6 +50,7 @@ def main(
     enforce_bc: bool,
     match_at_zero: bool,
     mse_loss: bool,
+    sample_with_constant_noise: bool,
     mlflow_local_path: str | None,
     args: dict[str, Any],
 ):
@@ -120,6 +126,7 @@ def main(
                         get_sample,
                         n_sample_steps=n_sample_steps,
                         power=2.0,
+                        constant_noise=sample_with_constant_noise,
                         model=model,
                         noise_schedule=noise_schedule,
                     ),
@@ -165,6 +172,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--mse-loss", action=argparse.BooleanOptionalAction, default=False
+    )
+    parser.add_argument(
+        "--sample-with-constant-noise", action=argparse.BooleanOptionalAction, default=True
     )
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     args = vars(parser.parse_args())
