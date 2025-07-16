@@ -30,8 +30,12 @@ def get_sample(
         if constant_noise:
             x_t = playground.ddim_interpolate(x_t, x_0, t1, t2, noise_schedule)
         else:
-            x_1 = torch.randn(batch_size, 2, device=generator.device, generator=generator)
-            x_t = playground.ddim_interpolate(x_1, x_0, t1, torch.ones_like(t1), noise_schedule)
+            x_1 = torch.randn(
+                batch_size, 2, device=generator.device, generator=generator
+            )
+            x_t = playground.ddim_interpolate(
+                x_1, x_0, t1, torch.ones_like(t1), noise_schedule
+            )
     return x_t
 
 
@@ -174,7 +178,9 @@ if __name__ == "__main__":
         "--mse-loss", action=argparse.BooleanOptionalAction, default=False
     )
     parser.add_argument(
-        "--sample-with-constant-noise", action=argparse.BooleanOptionalAction, default=True
+        "--sample-with-constant-noise",
+        action=argparse.BooleanOptionalAction,
+        default=True,
     )
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     args = vars(parser.parse_args())

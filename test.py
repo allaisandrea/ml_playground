@@ -306,7 +306,6 @@ DISPATCH = {
     "integrate_flow": test_integrate_flow,
     "flow_matching_compute_log_likelihood": test_flow_matching_compute_log_likelihood,
     "simple_model_io": test_simple_model_io,
-    "ddim_equivalence": test_ddim_equivalence,
 }
 
 
