@@ -56,6 +56,7 @@ def main(
     mse_loss: bool,
     sample_with_constant_noise: bool,
     use_diffusion_interpolant: bool,
+    n_checkerboard_blocks: int,
     mlflow_local_path: str | None,
     args: dict[str, Any],
 ):
@@ -71,7 +72,9 @@ def main(
     mlflow.log_params(args)
 
     noise_schedule = playground.NoiseSchedule.flow_matching()
-    checkerboard = playground.CheckerboardDistribution(num_blocks=2, range_=4.0)
+    checkerboard = playground.CheckerboardDistribution(
+        num_blocks=n_checkerboard_blocks, range_=4.0
+    )
     model = playground.ImmModel(
         n_channels=1024,
         n_layers=4,
@@ -196,6 +199,11 @@ if __name__ == "__main__":
         "--use-diffusion-interpolant",
         action=argparse.BooleanOptionalAction,
         default=False,
+    )
+    parser.add_argument(
+        "--n-checkerboard-blocks",
+        type=int,
+        default=2,
     )
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     args = vars(parser.parse_args())
