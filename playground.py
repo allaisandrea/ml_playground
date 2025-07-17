@@ -455,6 +455,32 @@ def ddim_interpolate(
     return (alpha_s - alpha_t * sigma_s / sigma_t) * x_0 + (sigma_s / sigma_t) * x_t
 
 
+def diffusion_interpolate(
+    x_t: torch.Tensor,
+    x_0: torch.Tensor,
+    s: torch.Tensor,
+    t: torch.Tensor,
+    noise_schedule: NoiseSchedule,
+    generator: torch.Generator,
+):
+    assert x_0.ndim >= 2
+    assert t.shape == s.shape
+    assert x_0.shape == x_t.shape
+    assert t.shape == x_t.shape[:-1]
+    t = t.unsqueeze(-1)
+    s = s.unsqueeze(-1)
+    alpha_t = noise_schedule.alpha(t)
+    alpha_s = noise_schedule.alpha(s)
+    sigma_t = noise_schedule.sigma(t)
+    sigma_s = noise_schedule.sigma(s)
+    corr = alpha_t * sigma_s / (alpha_s * sigma_t)
+    mean = alpha_s * x_0 + sigma_s * corr / sigma_t * (x_t - alpha_t * x_0)
+    stddev = sigma_s * torch.sqrt(1 - torch.square(corr))
+    return mean + stddev * torch.randn(
+        x_0.shape, generator=generator, device=x_0.device
+    )
+
+
 class ImmModel(torch.nn.Module):
     def __init__(
         self, n_channels: int, n_layers: int, condition_on_s: bool, enforce_bc: bool

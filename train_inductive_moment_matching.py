@@ -55,6 +55,7 @@ def main(
     match_at_zero: bool,
     mse_loss: bool,
     sample_with_constant_noise: bool,
+    use_diffusion_interpolant: bool,
     mlflow_local_path: str | None,
     args: dict[str, Any],
 ):
@@ -110,8 +111,17 @@ def main(
         with torch.no_grad():
             x_0a = model(x_r, s, r)
         x_0b = model(x_t, s, t)
-        x_sa = playground.ddim_interpolate(x_r, x_0a, s, r, noise_schedule)
-        x_sb = playground.ddim_interpolate(x_t, x_0b, s, t, noise_schedule)
+        if use_diffusion_interpolant:
+            x_sa = playground.diffusion_interpolate(
+                x_r, x_0a, s, r, noise_schedule, generator
+            )
+            x_sb = playground.diffusion_interpolate(
+                x_t, x_0b, s, t, noise_schedule, generator
+            )
+        else:
+            x_sa = playground.ddim_interpolate(x_r, x_0a, s, r, noise_schedule)
+            x_sb = playground.ddim_interpolate(x_t, x_0b, s, t, noise_schedule)
+
         if mse_loss:
             loss = torch.nn.functional.mse_loss(x_sa, x_sb)
         else:
@@ -181,6 +191,11 @@ if __name__ == "__main__":
         "--sample-with-constant-noise",
         action=argparse.BooleanOptionalAction,
         default=True,
+    )
+    parser.add_argument(
+        "--use-diffusion-interpolant",
+        action=argparse.BooleanOptionalAction,
+        default=False,
     )
     parser.add_argument("--mlflow-local-path", type=str, default=None)
     args = vars(parser.parse_args())
