@@ -151,6 +151,12 @@ class HistogramNd(torch.nn.Module):
         total = torch.sum(self._sum) + self._oob_sum
         return self.total_bins * (self._sum / total).view(*self.n_bins)
 
+    def average_count(self):
+        return self._sum.mean()
+
+    def oob_fraction(self):
+        return self._oob_sum / (self._sum.sum() + self._oob_sum)
+
 
 # Distributions ###############################################################
 
@@ -276,7 +282,12 @@ class CheckerboardDistribution:
         normalized_pdf = normalized_pdf.squeeze(0).squeeze(0)
         rgb_pdf = cmap(normalized_pdf.cpu().numpy())
         relative_entropy = compute_relative_entropy(true_pdf, sample_pdf.result())
-        return relative_entropy, rgb_pdf
+        return (
+            relative_entropy,
+            sample_pdf.average_count(),
+            sample_pdf.oob_fraction(),
+            rgb_pdf,
+        )
 
     def compute_and_log_relative_entropy(
         self,
@@ -298,12 +309,24 @@ class CheckerboardDistribution:
         batch_size: batch size
         """
         logger.info("Computing relative entropy for %s at step %d", tag, step)
-        relative_entropy, rgb_pdf = self.compute_relative_entropy(
-            get_sample, n_bins_per_subblock, n_samples, batch_size
+        relative_entropy, average_count, oob_fraction, rgb_pdf = (
+            self.compute_relative_entropy(
+                get_sample, n_bins_per_subblock, n_samples, batch_size
+            )
         )
         mlflow.log_metric(
             f"relative_entropy_{tag}",
             relative_entropy,
+            step=step,
+        )
+        mlflow.log_metric(
+            f"relative_entropy_{tag}_average_count",
+            average_count,
+            step=step,
+        )
+        mlflow.log_metric(
+            f"relative_entropy_{tag}_oob_fraction",
+            oob_fraction,
             step=step,
         )
         mlflow.log_image(
