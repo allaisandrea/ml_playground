@@ -58,8 +58,7 @@ def init_run(
 class Timer:
     def __init__(self):
         self.start_time = None
-        self.count = 0
-        self.total_time = 0.0
+        self.reset()
 
     def start(self):
         assert self.start_time is None
@@ -71,7 +70,14 @@ class Timer:
         self.update(end_time - self.start_time)
         self.start_time = None
 
+    def pause(self):
+        assert self.start_time is not None
+        end_time = time.perf_counter()
+        self.total_time += end_time - self.start_time
+        self.start_time = None
+
     def split(self):
+        assert self.start_time is not None
         split_time = time.perf_counter()
         self.update(split_time - self.start_time)
         self.start_time = split_time
