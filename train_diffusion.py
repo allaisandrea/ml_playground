@@ -135,7 +135,13 @@ def main(
             step_timer.start()
         if step % save_every == 0:
             logger.info("Saving checkpoint at step %d", step)
-            model.save(os.path.join(output_path, f"checkpoint_step_{step}"))
+            playground.save_checkpoint(
+                os.path.join(output_path, f"checkpoint_step_{step}.pth"),
+                step,
+                model,
+                optimizer,
+                generator,
+            )
         step_timer.split()
 
     logger.info("Saving final checkpoint")

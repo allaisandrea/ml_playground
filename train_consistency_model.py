@@ -38,6 +38,15 @@ class WithConsistencyBoundaryCondition(torch.nn.Module):
     def forward(self, t: torch.Tensor, x: torch.Tensor):
         return t[:, None] * self.wrapped(t, x) + (1 - t[:, None]) * x
 
+    def get_save_dict(self):
+        return self.wrapped.get_save_dict()
+
+    @staticmethod
+    def from_save_dict(save_dict: dict):
+        return WithConsistencyBoundaryCondition(
+            playground.SimpleModel.from_save_dict(save_dict)
+        )
+
 
 def main(
     tag: str,
@@ -116,7 +125,13 @@ def main(
         sample_timer.stop()
         if step % save_every == 0:
             logger.info("Saving checkpoint at step %d", step)
-            model.wrapped.save(os.path.join(output_path, f"model_{step}"))
+            playground.save_checkpoint(
+                os.path.join(output_path, f"checkpoint_step_{step}.pth"),
+                step,
+                model,
+                optimizer,
+                generator,
+            )
         step_timer.split()
 
     logger.info("Saving final checkpoint")
