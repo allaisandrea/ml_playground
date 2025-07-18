@@ -106,6 +106,7 @@ def main(
         r = (1 - dt) * torch.rand(
             (group_size, 1), device=generator.device, generator=generator
         ).expand(group_size, n_particles)
+        r = torch.maximum(r, torch.full_like(r, 0.01 * dt))
         t = r + dt
         if match_at_zero:
             s = torch.zeros_like(r)
