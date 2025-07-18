@@ -1,5 +1,6 @@
 from typing import Callable
 import dataclasses
+import collections
 import datetime
 import logging
 import os
@@ -52,6 +53,7 @@ def init_run(
         experiment_id="730119036412452",
     )
     logger.info("Starting run %s", run_name)
+    logger.info("Output path: %s", output_path)
     return run_name, output_path
 
 
@@ -162,6 +164,56 @@ class HistogramNd(torch.nn.Module):
 
     def oob_fraction(self):
         return self._oob_sum / (self._sum.sum() + self._oob_sum)
+
+
+def save_checkpoint(
+    path: str,
+    step: int,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    generator: torch.Generator,
+):
+    match optimizer:
+        case torch.optim.Adam():
+            optimizer_state_dict = {
+                "version": 1,
+                "type": "Adam",
+                "state": optimizer.state_dict(),
+            }
+        case _:
+            raise ValueError(f"Unsupported optimizer: {type(optimizer)}")
+    save_dict = {
+        "version": 1,
+        "step": step,
+        "model": model.get_save_dict(),
+        "optimizer": optimizer_state_dict,
+        "generator": generator.get_state(),
+    }
+    fs = get_fs(path)
+    fs.makedirs(os.path.dirname(path), exist_ok=True)
+    with fs.open(path, "wb") as f:
+        torch.save(save_dict, f)
+
+
+def load_checkpoint(
+    path: str,
+    load_model: Callable[[dict], torch.nn.Module],
+    device: torch.device,
+) -> tuple[int, torch.nn.Module, torch.optim.Optimizer, torch.Generator]:
+    with torch.serialization.safe_globals([collections.defaultdict, dict]):
+        with get_fs(path).open(path, "rb") as f:
+            save_dict = torch.load(f)
+    model = load_model(save_dict["model"])
+    model = model.to(device)
+    match save_dict["optimizer"]["type"]:
+        case "Adam":
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+            optimizer.load_state_dict(save_dict["optimizer"]["state"])
+        case _:
+            raise ValueError(f"Unsupported optimizer: {save_dict['optimizer']['type']}")
+    generator = torch.Generator(device=device)
+    generator.set_state(save_dict["generator"])
+    return save_dict["step"], model, optimizer, generator
 
 
 # Distributions ###############################################################
@@ -404,34 +456,25 @@ class SimpleModel(torch.nn.Module):
         """
         return self.mlp(torch.cat([t[:, None], x], dim=1))
 
-    def save(self, path: str):
-        fs = get_fs(path)
-        fs.makedirs(path, exist_ok=True)
-        config = {
+    def get_save_dict(self) -> dict:
+        return {
             "type": "SimpleModel",
             "version": 1,
             "n_channels": self.n_channels,
             "n_layers": self.n_layers,
+            "state_dict": self.state_dict(),
         }
-        with fs.open(os.path.join(path, "config.json"), "w") as f:
-            f.write(json.dumps(config))
-        with fs.open(os.path.join(path, "state_dict.pth"), "wb") as f:
-            torch.save(self.state_dict(), f)
 
     @staticmethod
-    def load(path: str):
-        fs = get_fs(path)
-        with fs.open(os.path.join(path, "config.json"), "r") as f:
-            config = json.load(f)
-        if config["type"] != "SimpleModel":
-            raise ValueError(f"Wrong model type: {config['type']}")
-        if config["version"] != 1:
-            raise ValueError(f"Wrong model version: {config['version']}")
+    def from_save_dict(save_dict: dict) -> "SimpleModel":
+        if save_dict["type"] != "SimpleModel":
+            raise ValueError(f"Wrong model type: {save_dict['type']}")
+        if save_dict["version"] != 1:
+            raise ValueError(f"Wrong model version: {save_dict['version']}")
         model = SimpleModel(
-            n_channels=config["n_channels"], n_layers=config["n_layers"]
+            n_channels=save_dict["n_channels"], n_layers=save_dict["n_layers"]
         )
-        with fs.open(os.path.join(path, "state_dict.pth"), "rb") as f:
-            model.load_state_dict(torch.load(f, weights_only=True))
+        model.load_state_dict(save_dict["state_dict"])
         return model
 
 
@@ -547,39 +590,30 @@ class ImmModel(torch.nn.Module):
             x_0_flat = t_flat * x_0_flat + (1 - t_flat) * x_t_flat
         return x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
 
-    def save(self, path: str):
-        fs = get_fs(path)
-        fs.makedirs(path, exist_ok=True)
-        config = {
+    def get_save_dict(self) -> dict:
+        return {
             "type": "ImmModel",
             "version": 1,
             "n_channels": self.n_channels,
             "n_layers": self.n_layers,
             "condition_on_s": self.condition_on_s,
             "enforce_bc": self.enforce_bc,
+            "state_dict": self.state_dict(),
         }
-        with fs.open(os.path.join(path, "config.json"), "w") as f:
-            f.write(json.dumps(config))
-        with fs.open(os.path.join(path, "state_dict.pth"), "wb") as f:
-            torch.save(self.state_dict(), f)
 
     @staticmethod
-    def load(path: str):
-        fs = get_fs(path)
-        with fs.open(os.path.join(path, "config.json"), "r") as f:
-            config = json.load(f)
-        if config["type"] != "ImmModel":
-            raise ValueError(f"Wrong model type: {config['type']}")
-        if config["version"] != 1:
-            raise ValueError(f"Wrong model version: {config['version']}")
+    def from_save_dict(save_dict: dict) -> "ImmModel":
+        if save_dict["type"] != "ImmModel":
+            raise ValueError(f"Wrong model type: {save_dict['type']}")
+        if save_dict["version"] != 1:
+            raise ValueError(f"Wrong model version: {save_dict['version']}")
         model = ImmModel(
-            n_channels=config["n_channels"],
-            n_layers=config["n_layers"],
-            condition_on_s=config["condition_on_s"],
-            enforce_bc=config["enforce_bc"],
+            n_channels=save_dict["n_channels"],
+            n_layers=save_dict["n_layers"],
+            condition_on_s=save_dict["condition_on_s"],
+            enforce_bc=save_dict["enforce_bc"],
         )
-        with fs.open(os.path.join(path, "state_dict.pth"), "rb") as f:
-            model.load_state_dict(torch.load(f, weights_only=True))
+        model.load_state_dict(save_dict["state_dict"])
         return model
 
 

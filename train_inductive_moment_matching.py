@@ -43,6 +43,7 @@ def get_sample(
 def main(
     tag: str,
     output_root: str,
+    start_from_checkpoint: str | None,
     n_steps: int,
     batch_size: int,
     log_every: int,
@@ -81,18 +82,26 @@ def main(
     checkerboard = playground.CheckerboardDistribution(
         num_blocks=n_checkerboard_blocks, range_=checkerboard_range
     )
-    model = playground.ImmModel(
-        n_channels=1024,
-        n_layers=4,
-        condition_on_s=condition_on_s,
-        enforce_bc=enforce_bc,
-    ).cuda()
-
-    generator = torch.Generator("cuda")
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    if start_from_checkpoint is not None:
+        starting_step, model, optimizer, generator = playground.load_checkpoint(
+            start_from_checkpoint,
+            playground.ImmModel.from_save_dict,
+            device=torch.device("cuda"),
+        )
+    else:
+        starting_step = 0
+        model = playground.ImmModel(
+            n_channels=1024,
+            n_layers=4,
+            condition_on_s=condition_on_s,
+            enforce_bc=enforce_bc,
+        )
+        model = model.cuda()
+        generator = torch.Generator("cuda")
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     step_timer = Timer()
     step_timer.start()
-    for step in range(1, n_steps + 1):
+    for step in range(starting_step + 1, n_steps + 1):
         optimizer.zero_grad()
         r = (1 - dt) * torch.rand(
             (group_size, 1), device=generator.device, generator=generator
@@ -172,7 +181,13 @@ def main(
             logger.info("Step %d, loss %f", step, loss.item())
         if step % save_every == 0:
             logger.info("Saving checkpoint at step %d", step)
-            model.save(os.path.join(output_path, f"checkpoint_step_{step}"))
+            playground.save_checkpoint(
+                os.path.join(output_path, f"checkpoint_step_{step}.pth"),
+                step,
+                model,
+                optimizer,
+                generator,
+            )
         step_timer.split()
 
 
@@ -184,6 +199,7 @@ if __name__ == "__main__":
         type=str,
         default=playground.DEFAULT_OUTPUT_ROOT,
     )
+    parser.add_argument("--start-from-checkpoint", type=str, default=None)
     parser.add_argument("--n-steps", type=int, default=500_000)
     parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument("--log-every", type=int, default=10_000)
