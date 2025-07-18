@@ -47,6 +47,7 @@ def main(
     log_every: int,
     n_sample: int,
     learning_rate: float,
+    seed: int,
     n_particles: int,
     kernel_radius: float,
     dt: float,
@@ -65,7 +66,7 @@ def main(
             f"batch_size ({batch_size}) must be divisible by n_particles ({n_particles})"
         )
     group_size = batch_size // n_particles
-    torch.manual_seed(0)
+    torch.manual_seed(seed)
     run_name, output_path = playground.init_run(
         tag, output_root, logger, mlflow_local_path
     )
@@ -175,6 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("--log-every", type=int, default=1000)
     parser.add_argument("--n-sample", type=int, default=100_000)
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n-particles", type=int, default=4)
     parser.add_argument("--kernel-radius", type=float, default=4.0)
     parser.add_argument("--dt", type=float, default=0.01)
