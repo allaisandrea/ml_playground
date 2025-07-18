@@ -607,7 +607,9 @@ class LaplacianKernel:
         self.sigma = sigma
 
     def __call__(self, x: torch.Tensor, y: torch.Tensor):
-        return torch.exp(-(x - y).norm(dim=-1) / self.sigma)
+        return torch.exp(
+            -torch.sqrt(torch.sum(torch.square((x - y) / self.sigma), dim=-1) + 1.0e-8)
+        )
 
 
 # ODE / SDE solvers ##########################################################
