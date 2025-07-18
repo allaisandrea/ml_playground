@@ -517,6 +517,8 @@ class ImmModel(torch.nn.Module):
         super().__init__()
         self.condition_on_s = condition_on_s
         self.enforce_bc = enforce_bc
+        self.n_channels = n_channels
+        self.n_layers = n_layers
         self.mlp = Mlp(4, 2, n_channels, n_layers)
 
     def forward(
@@ -544,6 +546,41 @@ class ImmModel(torch.nn.Module):
         if self.enforce_bc:
             x_0_flat = t_flat * x_0_flat + (1 - t_flat) * x_t_flat
         return x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
+
+    def save(self, path: str):
+        fs = get_fs(path)
+        fs.makedirs(path, exist_ok=True)
+        config = {
+            "type": "ImmModel",
+            "version": 1,
+            "n_channels": self.n_channels,
+            "n_layers": self.n_layers,
+            "condition_on_s": self.condition_on_s,
+            "enforce_bc": self.enforce_bc,
+        }
+        with fs.open(os.path.join(path, "config.json"), "w") as f:
+            f.write(json.dumps(config))
+        with fs.open(os.path.join(path, "state_dict.pth"), "wb") as f:
+            torch.save(self.state_dict(), f)
+
+    @staticmethod
+    def load(path: str):
+        fs = get_fs(path)
+        with fs.open(os.path.join(path, "config.json"), "r") as f:
+            config = json.load(f)
+        if config["type"] != "ImmModel":
+            raise ValueError(f"Wrong model type: {config['type']}")
+        if config["version"] != 1:
+            raise ValueError(f"Wrong model version: {config['version']}")
+        model = ImmModel(
+            n_channels=config["n_channels"],
+            n_layers=config["n_layers"],
+            condition_on_s=config["condition_on_s"],
+            enforce_bc=config["enforce_bc"],
+        )
+        with fs.open(os.path.join(path, "state_dict.pth"), "rb") as f:
+            model.load_state_dict(torch.load(f, weights_only=True))
+        return model
 
 
 def imm_compute_loss(
