@@ -213,7 +213,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-particles", type=int, default=4)
     parser.add_argument("--kernel-radius", type=float, default=4.0)
     parser.add_argument("--dt", type=float, default=0.01)
-    parser.add_argument("--n-checkerboard-blocks", type=int, default=2)
+    parser.add_argument("--n-checkerboard-blocks", type=int, default=4)
     parser.add_argument("--checkerboard-range", type=float, default=4.0)
     parser.add_argument(
         "--condition-on-s", action=argparse.BooleanOptionalAction, default=True
