@@ -38,6 +38,15 @@ class WithConsistencyBoundaryCondition(torch.nn.Module):
     def forward(self, t: torch.Tensor, x: torch.Tensor):
         return t[:, None] * self.wrapped(t, x) + (1 - t[:, None]) * x
 
+    def get_save_dict(self):
+        return self.wrapped.get_save_dict()
+
+    @staticmethod
+    def from_save_dict(save_dict: dict):
+        return WithConsistencyBoundaryCondition(
+            playground.SimpleModel.from_save_dict(save_dict)
+        )
+
 
 def main(
     tag: str,
@@ -48,18 +57,26 @@ def main(
     log_every: int,
     save_every: int,
     n_sample: int,
+    n_sample_steps: list[int],
+    sample_step_progression_power: float,
     dt: float,
     learning_rate: float,
     ema_update_weight: float,
+    seed: int,
+    n_checkerboard_blocks: int,
+    checkerboard_range: float,
     args: dict[str, Any],
 ):
     run_name, output_path = playground.init_run(tag, output_root, logger)
+    torch.manual_seed(seed)
     mlflow.log_params(args)
     if source_model_path is not None:
         source_model = playground.SimpleModel.load(source_model_path).cuda()
     else:
         source_model = None
-    checkerboard = playground.CheckerboardDistribution(num_blocks=2, range_=4.0)
+    checkerboard = playground.CheckerboardDistribution(
+        num_blocks=n_checkerboard_blocks, range_=checkerboard_range
+    )
     generator = torch.Generator("cuda")
     model = WithConsistencyBoundaryCondition(
         playground.SimpleModel(n_channels=1024, n_layers=4)
@@ -68,7 +85,6 @@ def main(
     model_ema.eval()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     step_timer = Timer()
-    sample_timer = Timer()
     step_timer.start()
     for step in range(1, n_steps + 1):
         optimizer.zero_grad()
@@ -90,37 +106,47 @@ def main(
         loss.backward()
         optimizer.step()
         playground.update_ema(model_ema, model, ema_update_weight)
-        sample_timer.start()
         if step % log_every == 0:
+            step_timer.pause()
+            sample_timer = Timer()
+            sample_timer.start()
             logger.info("Compute metrics for step %d", step)
-            for n_sample_steps in [1, 2, 3]:
+            for n_sample_steps_i in n_sample_steps:
                 checkerboard.compute_and_log_relative_entropy(
                     get_sample=functools.partial(
                         get_sample,
-                        n_sample_steps=n_sample_steps,
-                        power=2.0,
+                        n_sample_steps=n_sample_steps_i,
+                        power=sample_step_progression_power,
                         model=model,
                     ),
                     n_bins_per_subblock=5,
                     n_samples=n_sample,
                     batch_size=min(n_sample, 1 << 12),
-                    tag=f"{n_sample_steps}_steps",
+                    tag=f"{n_sample_steps_i}_steps",
                     step=step,
                 )
+            sample_timer.stop()
             mlflow.log_metric("loss", loss.item(), step=step)
             mlflow.log_metric("step_time", step_timer.mean(), step=step)
             mlflow.log_metric("sample_time", sample_timer.mean(), step=step)
+            mlflow.log_metric(
+                "sample_time_amortized", sample_timer.mean() / log_every, step=step
+            )
             step_timer.reset()
-            sample_timer.reset()
+            step_timer.start()
             logger.info("Step %d, loss %f", step, loss.item())
-        sample_timer.stop()
-        if step % save_every == 0:
+        if step % save_every == 0 or step == n_steps:
             logger.info("Saving checkpoint at step %d", step)
-            model.wrapped.save(os.path.join(output_path, f"model_{step}"))
+            playground.save_checkpoint(
+                os.path.join(output_path, f"checkpoint_step_{step}.pth"),
+                step,
+                model,
+                optimizer,
+                generator,
+            )
         step_timer.split()
 
     logger.info("Saving final checkpoint")
-    model.wrapped.save(os.path.join(output_path, "final_model"))
 
 
 if __name__ == "__main__":
@@ -132,13 +158,21 @@ if __name__ == "__main__":
         type=str,
         default=playground.DEFAULT_OUTPUT_ROOT,
     )
-    parser.add_argument("--n-steps", type=int, default=200_000)
+    parser.add_argument("--n-steps", type=int, default=500_000)
     parser.add_argument("--batch-size", type=int, default=1024)
-    parser.add_argument("--save-every", type=int, default=10000)
-    parser.add_argument("--log-every", type=int, default=1000)
+    parser.add_argument("--save-every", type=int, default=20_000)
+    parser.add_argument("--log-every", type=int, default=10_000)
     parser.add_argument("--n-sample", type=int, default=100_000)
+    parser.add_argument("--n-sample-steps", type=str, default="1,2,3,5")
+    parser.add_argument("--sample-step-progression-power", type=float, default=1.0)
     parser.add_argument("--dt", type=float, default=0.01)
-    parser.add_argument("--ema-update-weight", type=float, default=1.0e-3)
-    parser.add_argument("--learning-rate", type=float, default=1.0e-3)
+    parser.add_argument("--ema-update-weight", type=float, default=1.0e-2)
+    parser.add_argument("--learning-rate", type=float, default=1.0e-4)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--n-checkerboard-blocks", type=int, default=4)
+    parser.add_argument("--checkerboard-range", type=float, default=4.0)
     args = vars(parser.parse_args())
+    args["n_sample_steps"] = [
+        int(n_sample_steps_i) for n_sample_steps_i in args["n_sample_steps"].split(",")
+    ]
     main(**args, args=args)

@@ -1,5 +1,6 @@
 from typing import Callable
 import dataclasses
+import collections
 import datetime
 import logging
 import os
@@ -52,14 +53,14 @@ def init_run(
         experiment_id="730119036412452",
     )
     logger.info("Starting run %s", run_name)
+    logger.info("Output path: %s", output_path)
     return run_name, output_path
 
 
 class Timer:
     def __init__(self):
         self.start_time = None
-        self.count = 0
-        self.total_time = 0.0
+        self.reset()
 
     def start(self):
         assert self.start_time is None
@@ -71,7 +72,14 @@ class Timer:
         self.update(end_time - self.start_time)
         self.start_time = None
 
+    def pause(self):
+        assert self.start_time is not None
+        end_time = time.perf_counter()
+        self.total_time += end_time - self.start_time
+        self.start_time = None
+
     def split(self):
+        assert self.start_time is not None
         split_time = time.perf_counter()
         self.update(split_time - self.start_time)
         self.start_time = split_time
@@ -150,6 +158,62 @@ class HistogramNd(torch.nn.Module):
         """Normalized so that result.mean() == 1"""
         total = torch.sum(self._sum) + self._oob_sum
         return self.total_bins * (self._sum / total).view(*self.n_bins)
+
+    def average_count(self):
+        return self._sum.mean()
+
+    def oob_fraction(self):
+        return self._oob_sum / (self._sum.sum() + self._oob_sum)
+
+
+def save_checkpoint(
+    path: str,
+    step: int,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    generator: torch.Generator,
+):
+    match optimizer:
+        case torch.optim.Adam():
+            optimizer_state_dict = {
+                "version": 1,
+                "type": "Adam",
+                "state": optimizer.state_dict(),
+            }
+        case _:
+            raise ValueError(f"Unsupported optimizer: {type(optimizer)}")
+    save_dict = {
+        "version": 1,
+        "step": step,
+        "model": model.get_save_dict(),
+        "optimizer": optimizer_state_dict,
+        "generator": generator.get_state(),
+    }
+    fs = get_fs(path)
+    fs.makedirs(os.path.dirname(path), exist_ok=True)
+    with fs.open(path, "wb") as f:
+        torch.save(save_dict, f)
+
+
+def load_checkpoint(
+    path: str,
+    load_model: Callable[[dict], torch.nn.Module],
+    device: torch.device,
+) -> tuple[int, torch.nn.Module, torch.optim.Optimizer, torch.Generator]:
+    with torch.serialization.safe_globals([collections.defaultdict, dict]):
+        with get_fs(path).open(path, "rb") as f:
+            save_dict = torch.load(f)
+    model = load_model(save_dict["model"])
+    model = model.to(device)
+    match save_dict["optimizer"]["type"]:
+        case "Adam":
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+            optimizer.load_state_dict(save_dict["optimizer"]["state"])
+        case _:
+            raise ValueError(f"Unsupported optimizer: {save_dict['optimizer']['type']}")
+    generator = torch.Generator(device=device)
+    generator.set_state(save_dict["generator"])
+    return save_dict["step"], model, optimizer, generator
 
 
 # Distributions ###############################################################
@@ -276,7 +340,12 @@ class CheckerboardDistribution:
         normalized_pdf = normalized_pdf.squeeze(0).squeeze(0)
         rgb_pdf = cmap(normalized_pdf.cpu().numpy())
         relative_entropy = compute_relative_entropy(true_pdf, sample_pdf.result())
-        return relative_entropy, rgb_pdf
+        return (
+            relative_entropy,
+            sample_pdf.average_count(),
+            sample_pdf.oob_fraction(),
+            rgb_pdf,
+        )
 
     def compute_and_log_relative_entropy(
         self,
@@ -298,12 +367,24 @@ class CheckerboardDistribution:
         batch_size: batch size
         """
         logger.info("Computing relative entropy for %s at step %d", tag, step)
-        relative_entropy, rgb_pdf = self.compute_relative_entropy(
-            get_sample, n_bins_per_subblock, n_samples, batch_size
+        relative_entropy, average_count, oob_fraction, rgb_pdf = (
+            self.compute_relative_entropy(
+                get_sample, n_bins_per_subblock, n_samples, batch_size
+            )
         )
         mlflow.log_metric(
             f"relative_entropy_{tag}",
             relative_entropy,
+            step=step,
+        )
+        mlflow.log_metric(
+            f"relative_entropy_{tag}_average_count",
+            average_count,
+            step=step,
+        )
+        mlflow.log_metric(
+            f"relative_entropy_{tag}_oob_fraction",
+            oob_fraction,
             step=step,
         )
         mlflow.log_image(
@@ -375,34 +456,25 @@ class SimpleModel(torch.nn.Module):
         """
         return self.mlp(torch.cat([t[:, None], x], dim=1))
 
-    def save(self, path: str):
-        fs = get_fs(path)
-        fs.makedirs(path, exist_ok=True)
-        config = {
+    def get_save_dict(self) -> dict:
+        return {
             "type": "SimpleModel",
             "version": 1,
             "n_channels": self.n_channels,
             "n_layers": self.n_layers,
+            "state_dict": self.state_dict(),
         }
-        with fs.open(os.path.join(path, "config.json"), "w") as f:
-            f.write(json.dumps(config))
-        with fs.open(os.path.join(path, "state_dict.pth"), "wb") as f:
-            torch.save(self.state_dict(), f)
 
     @staticmethod
-    def load(path: str):
-        fs = get_fs(path)
-        with fs.open(os.path.join(path, "config.json"), "r") as f:
-            config = json.load(f)
-        if config["type"] != "SimpleModel":
-            raise ValueError(f"Wrong model type: {config['type']}")
-        if config["version"] != 1:
-            raise ValueError(f"Wrong model version: {config['version']}")
+    def from_save_dict(save_dict: dict) -> "SimpleModel":
+        if save_dict["type"] != "SimpleModel":
+            raise ValueError(f"Wrong model type: {save_dict['type']}")
+        if save_dict["version"] != 1:
+            raise ValueError(f"Wrong model version: {save_dict['version']}")
         model = SimpleModel(
-            n_channels=config["n_channels"], n_layers=config["n_layers"]
+            n_channels=save_dict["n_channels"], n_layers=save_dict["n_layers"]
         )
-        with fs.open(os.path.join(path, "state_dict.pth"), "rb") as f:
-            model.load_state_dict(torch.load(f, weights_only=True))
+        model.load_state_dict(save_dict["state_dict"])
         return model
 
 
@@ -455,6 +527,32 @@ def ddim_interpolate(
     return (alpha_s - alpha_t * sigma_s / sigma_t) * x_0 + (sigma_s / sigma_t) * x_t
 
 
+def diffusion_interpolate(
+    x_t: torch.Tensor,
+    x_0: torch.Tensor,
+    s: torch.Tensor,
+    t: torch.Tensor,
+    noise_schedule: NoiseSchedule,
+    generator: torch.Generator,
+):
+    assert x_0.ndim >= 2
+    assert t.shape == s.shape
+    assert x_0.shape == x_t.shape
+    assert t.shape == x_t.shape[:-1]
+    t = t.unsqueeze(-1)
+    s = s.unsqueeze(-1)
+    alpha_t = noise_schedule.alpha(t)
+    alpha_s = noise_schedule.alpha(s)
+    sigma_t = noise_schedule.sigma(t)
+    sigma_s = noise_schedule.sigma(s)
+    corr = alpha_t * sigma_s / (alpha_s * sigma_t)
+    mean = alpha_s * x_0 + sigma_s * corr / sigma_t * (x_t - alpha_t * x_0)
+    stddev = sigma_s * torch.sqrt(1 - torch.square(corr))
+    return mean + stddev * torch.randn(
+        x_0.shape, generator=generator, device=x_0.device
+    )
+
+
 class ImmModel(torch.nn.Module):
     def __init__(
         self, n_channels: int, n_layers: int, condition_on_s: bool, enforce_bc: bool
@@ -462,6 +560,8 @@ class ImmModel(torch.nn.Module):
         super().__init__()
         self.condition_on_s = condition_on_s
         self.enforce_bc = enforce_bc
+        self.n_channels = n_channels
+        self.n_layers = n_layers
         self.mlp = Mlp(4, 2, n_channels, n_layers)
 
     def forward(
@@ -490,6 +590,32 @@ class ImmModel(torch.nn.Module):
             x_0_flat = t_flat * x_0_flat + (1 - t_flat) * x_t_flat
         return x_0_flat.view(*x_t.shape[:-1], x_0_flat.shape[-1])
 
+    def get_save_dict(self) -> dict:
+        return {
+            "type": "ImmModel",
+            "version": 1,
+            "n_channels": self.n_channels,
+            "n_layers": self.n_layers,
+            "condition_on_s": self.condition_on_s,
+            "enforce_bc": self.enforce_bc,
+            "state_dict": self.state_dict(),
+        }
+
+    @staticmethod
+    def from_save_dict(save_dict: dict) -> "ImmModel":
+        if save_dict["type"] != "ImmModel":
+            raise ValueError(f"Wrong model type: {save_dict['type']}")
+        if save_dict["version"] != 1:
+            raise ValueError(f"Wrong model version: {save_dict['version']}")
+        model = ImmModel(
+            n_channels=save_dict["n_channels"],
+            n_layers=save_dict["n_layers"],
+            condition_on_s=save_dict["condition_on_s"],
+            enforce_bc=save_dict["enforce_bc"],
+        )
+        model.load_state_dict(save_dict["state_dict"])
+        return model
+
 
 def imm_compute_loss(
     sample_a: torch.Tensor,
@@ -515,7 +641,9 @@ class LaplacianKernel:
         self.sigma = sigma
 
     def __call__(self, x: torch.Tensor, y: torch.Tensor):
-        return torch.exp(-(x - y).norm(dim=-1) / self.sigma)
+        return torch.exp(
+            -torch.sqrt(torch.sum(torch.square((x - y) / self.sigma), dim=-1) + 1.0e-8)
+        )
 
 
 # ODE / SDE solvers ##########################################################
