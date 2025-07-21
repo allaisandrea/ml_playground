@@ -180,7 +180,7 @@ def main(
             step_timer.reset()
             step_timer.start()
             logger.info("Step %d, loss %f", step, loss.item())
-        if step % save_every == 0:
+        if step % save_every == 0 or step == n_steps:
             logger.info("Saving checkpoint at step %d", step)
             playground.save_checkpoint(
                 os.path.join(output_path, f"checkpoint_step_{step}.pth"),
