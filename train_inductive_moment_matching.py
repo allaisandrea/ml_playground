@@ -1,5 +1,6 @@
 from typing import Any
 import os
+import copy
 import argparse
 import logging
 import functools
@@ -52,6 +53,7 @@ def main(
     n_sample_steps: list[int],
     sample_step_progression_power: float,
     learning_rate: float,
+    ema_update_weight: float,
     seed: int,
     n_particles: int,
     kernel_radius: float,
@@ -99,6 +101,8 @@ def main(
         model = model.cuda()
         generator = torch.Generator("cuda")
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    target_model = copy.deepcopy(model)
+    target_model.eval()
     step_timer = Timer()
     step_timer.start()
     for step in range(starting_step + 1, n_steps + 1):
@@ -126,8 +130,7 @@ def main(
         x_t = playground.ddim_interpolate(
             x_1, x_0, t, torch.ones_like(t), noise_schedule
         )
-        with torch.no_grad():
-            x_0a = model(x_r, s, r)
+        x_0a = target_model(x_r, s, r)
         x_0b = model(x_t, s, t)
         if use_diffusion_interpolant:
             x_sa = playground.diffusion_interpolate(
@@ -148,6 +151,7 @@ def main(
             )
         loss.backward()
         optimizer.step()
+        playground.update_ema(target_model, model, ema_update_weight)
 
         if step % log_every == 0:
             step_timer.pause()
@@ -209,6 +213,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-sample-steps", type=str, default="1,2,3,5")
     parser.add_argument("--sample-step-progression-power", type=float, default=1.0)
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
+    parser.add_argument("--ema-update-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n-particles", type=int, default=4)
     parser.add_argument("--kernel-radius", type=float, default=4.0)
