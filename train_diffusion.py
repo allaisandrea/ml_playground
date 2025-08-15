@@ -1,3 +1,4 @@
+import sys
 import os
 import functools
 from typing import Any
@@ -76,11 +77,11 @@ def main(
     n_integration_steps: list[int],
     learning_rate: float,
     seed: int,
-    args: dict[str, Any],
 ):
+    all_args = locals()
     run_name, output_path = playground.init_run(tag, output_root, logger)
     torch.manual_seed(seed)
-    mlflow.log_params(args)
+    mlflow.log_params(all_args)
     checkerboard = playground.CheckerboardDistribution(
         num_blocks=n_checkerboard_blocks, range_=checkerboard_range
     )
@@ -148,7 +149,7 @@ def main(
     mlflow.end_run()
 
 
-if __name__ == "__main__":
+def parse_args(args: list[str]) -> dict[str, Any]:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", type=str, required=True)
     parser.add_argument(
@@ -169,8 +170,13 @@ if __name__ == "__main__":
     parser.add_argument("--n-integration-steps", type=str, default="50")
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=0)
-    args = vars(parser.parse_args())
+    args = vars(parser.parse_args(args))
     args["n_integration_steps"] = [
         int(x) for x in args["n_integration_steps"].split(",")
     ]
-    main(**args, args=args)
+    return args
+
+
+if __name__ == "__main__":
+    args = parse_args(sys.argv[1:])
+    main(**args)
