@@ -58,6 +58,7 @@ def main(
     n_particles: int,
     kernel_radius: float,
     dt: float,
+    s_sample_power: float,
     condition_on_s: bool,
     enforce_bc: bool,
     match_at_zero: bool,
@@ -115,8 +116,11 @@ def main(
         if match_at_zero:
             s = torch.zeros_like(r)
         else:
-            s = r * torch.rand(
-                (group_size, 1), device=generator.device, generator=generator
+            s = r * torch.pow(
+                torch.rand(
+                    (group_size, 1), device=generator.device, generator=generator
+                ),
+                s_sample_power,
             ).expand(group_size, n_particles)
         x_0 = checkerboard.sample(group_size * n_particles, generator).reshape(
             group_size, n_particles, 2
@@ -220,6 +224,7 @@ if __name__ == "__main__":
     parser.add_argument("--dt", type=float, default=0.01)
     parser.add_argument("--n-checkerboard-blocks", type=int, default=4)
     parser.add_argument("--checkerboard-range", type=float, default=4.0)
+    parser.add_argument("--s-sample-power", type=float, default=1.0)
     parser.add_argument(
         "--condition-on-s", action=argparse.BooleanOptionalAction, default=True
     )
